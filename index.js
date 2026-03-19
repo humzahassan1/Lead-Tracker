@@ -40,7 +40,7 @@ const tokenCache = {};
 app.get('/auth/login', (req, res) => {
   const authUrl = pca.getAuthCodeUrl({
     scopes: ['Mail.Read', 'User.Read'],
-    redirectUri: 'http://localhost:3000/auth/callback',
+    redirectUri: 'https://lead-tracker-production.up.railway.app/auth/callback',
   });
   authUrl.then(url => res.redirect(url)).catch(err => res.status(500).send(err.message));
 });
@@ -54,7 +54,7 @@ app.get('/auth/callback', async (req, res) => {
     const result = await pca.acquireTokenByCode({
       code,
       scopes: ['Mail.Read', 'User.Read'],
-      redirectUri: 'http://localhost:3000/auth/callback',
+      redirectUri: 'https://lead-tracker-production.up.railway.app/auth/callback',
     });
 
     const userId = result.account.homeAccountId;
@@ -63,7 +63,8 @@ app.get('/auth/callback', async (req, res) => {
 
     await supabase.from('properties').select('id').eq('user_id', userId).limit(1);
 
-    res.redirect(`https://lead-tracker-wine.vercel.app?userId=${userId}`);  } catch (err) {
+    res.redirect(`https://lead-tracker-wine.vercel.app?userId=${userId}`);
+  } catch (err) {
     res.status(500).send('Auth failed: ' + err.message);
   }
 });
