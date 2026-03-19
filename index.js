@@ -28,11 +28,12 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 
 // ---- RATE LIMITING ----
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: { error: 'Too many requests, slow down.' }
-});
-app.use(limiter);
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: { error: 'Too many requests, slow down.' },
+    validate: { xForwardedForHeader: false }
+  });
+  app.set('trust proxy', 1);
 
 // ---- MICROSOFT AUTH ----
 const msalConfig = {
