@@ -16,11 +16,11 @@ const isDev = process.env.NODE_ENV !== 'production';
 app.use(express.json());
 app.use(cookieParser());
 app.use(cors({
-  origin: isDev
-    ? ['http://localhost:5173', 'https://lead-tracker-wine.vercel.app']
-    : 'https://lead-tracker-wine.vercel.app',
-  credentials: true
-}));
+    // Use an array to be safe, or just the Vercel URL
+    origin: ['https://lead-tracker-wine.vercel.app', 'http://localhost:5173'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  }));
 app.use(helmet());
 
 // ---- SUPABASE ----
