@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import './App.css'
 
-const API = 'http://localhost:3000'
+const API = 'https://lead-tracker-production.up.railway.app'
 
 function App() {
   const [userId, setUserId] = useState(localStorage.getItem('userId') || null)
