@@ -95,11 +95,12 @@ app.get('/auth/callback', async (req, res) => {
     );
 
     res.cookie('session', jwtToken, {
-      httpOnly: true,
-      secure: !isDev,
-      sameSite: isDev ? 'lax' : 'none',
-      maxAge: 8 * 60 * 60 * 1000
-    });
+        httpOnly: true,
+        secure: true, // MUST be true for SameSite: 'none'
+        sameSite: 'none', // Critical for cross-domain (Vercel -> Railway)
+        maxAge: 8 * 60 * 60 * 1000,
+        // If you are using a custom domain later, add: domain: '.yourdomain.com'
+      });
 
     const redirectTo = isDev
       ? 'http://localhost:5173?loggedIn=true'
