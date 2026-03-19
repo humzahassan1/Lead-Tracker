@@ -11,10 +11,14 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 
 const app = express();
+const isDev = process.env.NODE_ENV !== 'production';
+
 app.use(express.json());
 app.use(cookieParser());
 app.use(cors({
-  origin: 'https://lead-tracker-wine.vercel.app',
+  origin: isDev
+    ? ['http://localhost:5173', 'https://lead-tracker-wine.vercel.app']
+    : 'https://lead-tracker-wine.vercel.app',
   credentials: true
 }));
 app.use(helmet());
@@ -43,7 +47,6 @@ const pca = new msal.ConfidentialClientApplication(msalConfig);
 const tokenCache = {};
 
 // ---- JWT MIDDLEWARE ----
-// This runs on every protected route and verifies the JWT cookie
 function requireAuth(req, res, next) {
   const token = req.cookies.session;
   if (!token) return res.status(401).json({ error: 'Not logged in' });
@@ -51,6 +54,7 @@ function requireAuth(req, res, next) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
+    req.userEmail = decoded.userEmail || '';
     req.msToken = tokenCache[decoded.userId];
     next();
   } catch (err) {
@@ -81,24 +85,27 @@ app.get('/auth/callback', async (req, res) => {
     });
 
     const userId = result.account.homeAccountId;
+    const userEmail = result.account.username;
     tokenCache[userId] = result.accessToken;
 
-    // Create JWT
     const jwtToken = jwt.sign(
-      { userId },
+      { userId, userEmail },
       process.env.JWT_SECRET,
       { expiresIn: '8h' }
     );
 
-    // Set as HTTP-only cookie — JavaScript in the browser cannot access this
     res.cookie('session', jwtToken, {
       httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 8 * 60 * 60 * 1000 // 8 hours
+      secure: !isDev,
+      sameSite: isDev ? 'lax' : 'none',
+      maxAge: 8 * 60 * 60 * 1000
     });
 
-    res.redirect(`https://lead-tracker-wine.vercel.app?loggedIn=true`);
+    const redirectTo = isDev
+      ? 'http://localhost:5173?loggedIn=true'
+      : 'https://lead-tracker-wine.vercel.app?loggedIn=true';
+
+    res.redirect(redirectTo);
   } catch (err) {
     res.status(500).send('Auth failed: ' + err.message);
   }
@@ -108,15 +115,15 @@ app.get('/auth/callback', async (req, res) => {
 app.post('/auth/logout', (req, res) => {
   res.clearCookie('session', {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none'
+    secure: !isDev,
+    sameSite: isDev ? 'lax' : 'none'
   });
   res.json({ success: true });
 });
 
 // ---- GET CURRENT USER ----
 app.get('/auth/me', requireAuth, (req, res) => {
-  res.json({ userId: req.userId });
+  res.json({ userId: req.userId, userEmail: req.userEmail });
 });
 
 // ---- IDOR PROTECTION ----
@@ -324,3 +331,8 @@ app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Login at: http://localhost:${PORT}/auth/login`);
 });
+```
+
+Also make sure your `.env` has:
+```
+NODE_ENV=development

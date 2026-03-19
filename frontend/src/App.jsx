@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import './App.css'
 
-const API = 'https://lead-tracker-production.up.railway.app'
+const API = 'http://localhost:3000'
 
 // Always send cookies with requests
 axios.defaults.withCredentials = true
