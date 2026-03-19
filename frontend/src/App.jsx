@@ -4,8 +4,12 @@ import './App.css'
 
 const API = 'https://lead-tracker-production.up.railway.app'
 
+// Always send cookies with requests
+axios.defaults.withCredentials = true
+
 function App() {
-  const [userId, setUserId] = useState(localStorage.getItem('userId') || null)
+  const [userId, setUserId] = useState(null)
+  const [loading, setLoading] = useState(true)
   const [properties, setProperties] = useState([])
   const [selectedProp, setSelectedProp] = useState(null)
   const [leads, setLeads] = useState([])
@@ -17,15 +21,18 @@ function App() {
   const [showAddProp, setShowAddProp] = useState(false)
   const [showAddLead, setShowAddLead] = useState(false)
 
-  // Check if coming back from Microsoft login
+  // Check if already logged in via cookie
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const id = params.get('userId')
-    if (id) {
-      localStorage.setItem('userId', id)
-      setUserId(id)
-      window.history.replaceState({}, '', '/')
+    async function checkAuth() {
+      try {
+        const res = await axios.get(`${API}/auth/me`)
+        setUserId(res.data.userId)
+      } catch {
+        setUserId(null)
+      }
+      setLoading(false)
     }
+    checkAuth()
   }, [])
 
   useEffect(() => {
@@ -34,20 +41,16 @@ function App() {
 
   async function loadProperties() {
     try {
-      const res = await axios.get(`${API}/properties`, {
-        headers: { 'x-user-id': userId }
-      })
+      const res = await axios.get(`${API}/properties`)
       setProperties(res.data)
     } catch (err) {
-      console.error(err)
+      if (err.response?.status === 401) setUserId(null)
     }
   }
 
   async function loadLeads(propId) {
     try {
-      const res = await axios.get(`${API}/properties/${propId}/leads`, {
-        headers: { 'x-user-id': userId }
-      })
+      const res = await axios.get(`${API}/properties/${propId}/leads`)
       setLeads(res.data)
     } catch (err) {
       console.error(err)
@@ -58,22 +61,23 @@ function App() {
     setSyncing(true)
     setSyncMsg('')
     try {
-      const res = await axios.post(`${API}/sync-emails`, {}, {
-        headers: { 'x-user-id': userId }
-      })
+      const res = await axios.post(`${API}/sync-emails`)
       setSyncMsg(res.data.message)
       loadProperties()
     } catch (err) {
-      setSyncMsg('Sync failed. Try logging in again.')
+      if (err.response?.status === 401) {
+        setSyncMsg('Session expired. Please log in again.')
+        setUserId(null)
+      } else {
+        setSyncMsg('Sync failed. Try again.')
+      }
     }
     setSyncing(false)
   }
 
   async function addProperty() {
     if (!newProp.name) return
-    await axios.post(`${API}/properties`, newProp, {
-      headers: { 'x-user-id': userId }
-    })
+    await axios.post(`${API}/properties`, newProp)
     setNewProp({ name: '', address: '' })
     setShowAddProp(false)
     loadProperties()
@@ -81,12 +85,16 @@ function App() {
 
   async function addLead() {
     if (!newLead.name) return
-    await axios.post(`${API}/properties/${selectedProp.id}/leads`, newLead, {
-      headers: { 'x-user-id': userId }
-    })
+    await axios.post(`${API}/properties/${selectedProp.id}/leads`, newLead)
     setNewLead({ name: '', phone: '', email: '', notes: '' })
     setShowAddLead(false)
     loadLeads(selectedProp.id)
+  }
+
+  async function logout() {
+    await axios.post(`${API}/auth/logout`)
+    setUserId(null)
+    setProperties([])
   }
 
   function openProperty(prop) {
@@ -95,13 +103,16 @@ function App() {
     setView('leads')
   }
 
-  function logout() {
-    localStorage.removeItem('userId')
-    setUserId(null)
-    setProperties([])
+  if (loading) {
+    return (
+      <div className="login-page">
+        <div className="login-box">
+          <p style={{ color: '#888' }}>Loading...</p>
+        </div>
+      </div>
+    )
   }
 
-  // ---- LOGIN PAGE ----
   if (!userId) {
     return (
       <div className="login-page">
@@ -116,7 +127,6 @@ function App() {
     )
   }
 
-  // ---- LEADS VIEW ----
   if (view === 'leads' && selectedProp) {
     return (
       <div className="app">
@@ -155,7 +165,6 @@ function App() {
     )
   }
 
-  // ---- PROPERTIES VIEW ----
   return (
     <div className="app">
       <header>

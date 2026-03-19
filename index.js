@@ -7,10 +7,16 @@ const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
 const msal = require('@azure/msal-node');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: 'https://lead-tracker-wine.vercel.app' }));
+app.use(cookieParser());
+app.use(cors({
+  origin: 'https://lead-tracker-wine.vercel.app',
+  credentials: true
+}));
 app.use(helmet());
 
 // ---- SUPABASE ----
@@ -36,6 +42,23 @@ const msalConfig = {
 const pca = new msal.ConfidentialClientApplication(msalConfig);
 const tokenCache = {};
 
+// ---- JWT MIDDLEWARE ----
+// This runs on every protected route and verifies the JWT cookie
+function requireAuth(req, res, next) {
+  const token = req.cookies.session;
+  if (!token) return res.status(401).json({ error: 'Not logged in' });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.userId = decoded.userId;
+    req.msToken = tokenCache[decoded.userId];
+    next();
+  } catch (err) {
+    res.clearCookie('session');
+    return res.status(401).json({ error: 'Session expired, please log in again' });
+  }
+}
+
 // ---- STEP 1: Login redirect ----
 app.get('/auth/login', (req, res) => {
   const authUrl = pca.getAuthCodeUrl({
@@ -58,15 +81,42 @@ app.get('/auth/callback', async (req, res) => {
     });
 
     const userId = result.account.homeAccountId;
-    const userEmail = result.account.username;
     tokenCache[userId] = result.accessToken;
 
-    await supabase.from('properties').select('id').eq('user_id', userId).limit(1);
+    // Create JWT
+    const jwtToken = jwt.sign(
+      { userId },
+      process.env.JWT_SECRET,
+      { expiresIn: '8h' }
+    );
 
-    res.redirect(`https://lead-tracker-wine.vercel.app?userId=${userId}`);
+    // Set as HTTP-only cookie — JavaScript in the browser cannot access this
+    res.cookie('session', jwtToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      maxAge: 8 * 60 * 60 * 1000 // 8 hours
+    });
+
+    res.redirect(`https://lead-tracker-wine.vercel.app?loggedIn=true`);
   } catch (err) {
     res.status(500).send('Auth failed: ' + err.message);
   }
+});
+
+// ---- LOGOUT ----
+app.post('/auth/logout', (req, res) => {
+  res.clearCookie('session', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none'
+  });
+  res.json({ success: true });
+});
+
+// ---- GET CURRENT USER ----
+app.get('/auth/me', requireAuth, (req, res) => {
+  res.json({ userId: req.userId });
 });
 
 // ---- IDOR PROTECTION ----
@@ -101,12 +151,10 @@ function extractLeadInfo(email) {
 }
 
 // ---- SYNC EMAILS ----
-app.post('/sync-emails', async (req, res) => {
-  const userId = req.headers['x-user-id'];
-  if (!userId) return res.status(401).json({ error: 'Missing user ID' });
-
-  const token = tokenCache[userId];
-  if (!token) return res.status(401).json({ error: 'Not logged in. Visit /auth/login first' });
+app.post('/sync-emails', requireAuth, async (req, res) => {
+  const userId = req.userId;
+  const token = req.msToken;
+  if (!token) return res.status(401).json({ error: 'Microsoft token expired, please log in again' });
 
   try {
     const response = await fetch('https://graph.microsoft.com/v1.0/me/messages?$top=50&$orderby=receivedDateTime desc&$select=subject,from,body,receivedDateTime', {
@@ -180,34 +228,28 @@ app.post('/sync-emails', async (req, res) => {
 });
 
 // ---- PROPERTIES ----
-app.get('/properties', async (req, res) => {
-  const userId = req.headers['x-user-id'];
-  if (!userId) return res.status(401).json({ error: 'Missing user ID' });
-
+app.get('/properties', requireAuth, async (req, res) => {
   const { data, error } = await supabase
     .from('properties')
     .select('*')
-    .eq('user_id', userId);
+    .eq('user_id', req.userId);
 
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
 
-app.post('/properties', [
+app.post('/properties', requireAuth, [
   body('name').trim().escape().notEmpty(),
   body('address').trim().escape()
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  const userId = req.headers['x-user-id'];
-  if (!userId) return res.status(401).json({ error: 'Missing user ID' });
-
   const { name, address } = req.body;
 
   const { data, error } = await supabase
     .from('properties')
-    .insert({ name, address, user_id: userId })
+    .insert({ name, address, user_id: req.userId })
     .select()
     .single();
 
@@ -216,11 +258,8 @@ app.post('/properties', [
 });
 
 // ---- LEADS ----
-app.get('/properties/:propertyId/leads', async (req, res) => {
-  const userId = req.headers['x-user-id'];
-  if (!userId) return res.status(401).json({ error: 'Missing user ID' });
-
-  const owns = await verifyPropertyOwner(req.params.propertyId, userId);
+app.get('/properties/:propertyId/leads', requireAuth, async (req, res) => {
+  const owns = await verifyPropertyOwner(req.params.propertyId, req.userId);
   if (!owns) return res.status(403).json({ error: 'Access denied' });
 
   const { data, error } = await supabase
@@ -232,7 +271,7 @@ app.get('/properties/:propertyId/leads', async (req, res) => {
   res.json(data);
 });
 
-app.post('/properties/:propertyId/leads', [
+app.post('/properties/:propertyId/leads', requireAuth, [
   body('name').trim().escape().notEmpty(),
   body('phone').trim().escape(),
   body('email').trim().normalizeEmail(),
@@ -241,10 +280,7 @@ app.post('/properties/:propertyId/leads', [
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  const userId = req.headers['x-user-id'];
-  if (!userId) return res.status(401).json({ error: 'Missing user ID' });
-
-  const owns = await verifyPropertyOwner(req.params.propertyId, userId);
+  const owns = await verifyPropertyOwner(req.params.propertyId, req.userId);
   if (!owns) return res.status(403).json({ error: 'Access denied' });
 
   const { name, phone, email, notes, date_contacted } = req.body;
@@ -253,7 +289,7 @@ app.post('/properties/:propertyId/leads', [
     .from('leads')
     .insert({
       property_id: req.params.propertyId,
-      user_id: userId,
+      user_id: req.userId,
       name, phone, email, notes, date_contacted
     })
     .select()
@@ -263,15 +299,12 @@ app.post('/properties/:propertyId/leads', [
   res.json(data);
 });
 
-app.delete('/leads/:leadId', async (req, res) => {
-  const userId = req.headers['x-user-id'];
-  if (!userId) return res.status(401).json({ error: 'Missing user ID' });
-
+app.delete('/leads/:leadId', requireAuth, async (req, res) => {
   const { data: lead, error: leadError } = await supabase
     .from('leads')
     .select('id')
     .eq('id', req.params.leadId)
-    .eq('user_id', userId)
+    .eq('user_id', req.userId)
     .single();
 
   if (leadError || !lead) return res.status(403).json({ error: 'Access denied' });
