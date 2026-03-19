@@ -10,7 +10,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+app.use(cors({ origin: 'https://lead-tracker-wine.vercel.app' }));
 app.use(helmet());
 
 // ---- SUPABASE ----
@@ -63,8 +63,7 @@ app.get('/auth/callback', async (req, res) => {
 
     await supabase.from('properties').select('id').eq('user_id', userId).limit(1);
 
-    res.redirect(`http://localhost:5173?userId=${userId}`);
-  } catch (err) {
+    res.redirect(`https://lead-tracker-wine.vercel.app?userId=${userId}`);  } catch (err) {
     res.status(500).send('Auth failed: ' + err.message);
   }
 });
