@@ -1,11 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import './App.css'
 
 const API = 'https://lead-tracker-production.up.railway.app'
-
-// Always send cookies with requests
-axios.defaults.withCredentials = true
 
 function App() {
   const [userId, setUserId] = useState(null)
@@ -20,14 +17,43 @@ function App() {
   const [newLead, setNewLead] = useState({ name: '', phone: '', email: '', notes: '' })
   const [showAddProp, setShowAddProp] = useState(false)
   const [showAddLead, setShowAddLead] = useState(false)
+  const tokenRef = useRef(null)
 
-  // Check if already logged in via cookie
+  // Helper to make authenticated requests
+  function authHeaders() {
+    return tokenRef.current 
+      ? { Authorization: `Bearer ${tokenRef.current}` }
+      : {}
+  }
+
   useEffect(() => {
     async function checkAuth() {
-      try {
-        const res = await axios.get(`${API}/auth/me`)
-        setUserId(res.data.userId)
-      } catch {
+      // Check URL for token first
+      const params = new URLSearchParams(window.location.search)
+      const urlToken = params.get('token')
+      
+      if (urlToken) {
+        tokenRef.current = urlToken
+        sessionStorage.setItem('token', urlToken)
+        window.history.replaceState({}, '', '/')
+      } else {
+        // Check sessionStorage
+        const stored = sessionStorage.getItem('token')
+        if (stored) tokenRef.current = stored
+      }
+
+      if (tokenRef.current) {
+        try {
+          const res = await axios.get(`${API}/auth/me`, {
+            headers: authHeaders()
+          })
+          setUserId(res.data.userId)
+        } catch {
+          tokenRef.current = null
+          sessionStorage.removeItem('token')
+          setUserId(null)
+        }
+      } else {
         setUserId(null)
       }
       setLoading(false)
@@ -41,16 +67,23 @@ function App() {
 
   async function loadProperties() {
     try {
-      const res = await axios.get(`${API}/properties`)
+      const res = await axios.get(`${API}/properties`, {
+        headers: authHeaders()
+      })
       setProperties(res.data)
     } catch (err) {
-      if (err.response?.status === 401) setUserId(null)
+      if (err.response?.status === 401) {
+        setUserId(null)
+        sessionStorage.removeItem('token')
+      }
     }
   }
 
   async function loadLeads(propId) {
     try {
-      const res = await axios.get(`${API}/properties/${propId}/leads`)
+      const res = await axios.get(`${API}/properties/${propId}/leads`, {
+        headers: authHeaders()
+      })
       setLeads(res.data)
     } catch (err) {
       console.error(err)
@@ -61,13 +94,16 @@ function App() {
     setSyncing(true)
     setSyncMsg('')
     try {
-      const res = await axios.post(`${API}/sync-emails`)
+      const res = await axios.post(`${API}/sync-emails`, {}, {
+        headers: authHeaders()
+      })
       setSyncMsg(res.data.message)
       loadProperties()
     } catch (err) {
       if (err.response?.status === 401) {
         setSyncMsg('Session expired. Please log in again.')
         setUserId(null)
+        sessionStorage.removeItem('token')
       } else {
         setSyncMsg('Sync failed. Try again.')
       }
@@ -77,7 +113,9 @@ function App() {
 
   async function addProperty() {
     if (!newProp.name) return
-    await axios.post(`${API}/properties`, newProp)
+    await axios.post(`${API}/properties`, newProp, {
+      headers: authHeaders()
+    })
     setNewProp({ name: '', address: '' })
     setShowAddProp(false)
     loadProperties()
@@ -85,14 +123,17 @@ function App() {
 
   async function addLead() {
     if (!newLead.name) return
-    await axios.post(`${API}/properties/${selectedProp.id}/leads`, newLead)
+    await axios.post(`${API}/properties/${selectedProp.id}/leads`, newLead, {
+      headers: authHeaders()
+    })
     setNewLead({ name: '', phone: '', email: '', notes: '' })
     setShowAddLead(false)
     loadLeads(selectedProp.id)
   }
 
   async function logout() {
-    await axios.post(`${API}/auth/logout`)
+    tokenRef.current = null
+    sessionStorage.removeItem('token')
     setUserId(null)
     setProperties([])
   }

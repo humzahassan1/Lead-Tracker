@@ -16,11 +16,10 @@ const isDev = process.env.NODE_ENV !== 'production';
 app.use(express.json());
 app.use(cookieParser());
 app.use(cors({
-    // Use an array to be safe, or just the Vercel URL
-    origin: ['https://lead-tracker-wine.vercel.app', 'http://localhost:5173'],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-  }));
+  origin: ['https://lead-tracker-wine.vercel.app', 'http://localhost:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
 app.use(helmet());
 
 // ---- SUPABASE ----
@@ -51,7 +50,15 @@ const tokenCache = {};
 
 // ---- JWT MIDDLEWARE ----
 function requireAuth(req, res, next) {
-  const token = req.cookies.session;
+  let token = null;
+
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else {
+    token = req.cookies.session;
+  }
+
   if (!token) return res.status(401).json({ error: 'Not logged in' });
 
   try {
@@ -97,17 +104,9 @@ app.get('/auth/callback', async (req, res) => {
       { expiresIn: '8h' }
     );
 
-    res.cookie('session', jwtToken, {
-        httpOnly: true,
-        secure: true, // MUST be true for SameSite: 'none'
-        sameSite: 'none', // Critical for cross-domain (Vercel -> Railway)
-        maxAge: 8 * 60 * 60 * 1000,
-        // If you are using a custom domain later, add: domain: '.yourdomain.com'
-      });
-
     const redirectTo = isDev
-      ? 'http://localhost:5173?loggedIn=true'
-      : 'https://lead-tracker-wine.vercel.app?loggedIn=true';
+      ? `http://localhost:5173?token=${jwtToken}`
+      : `https://lead-tracker-wine.vercel.app?token=${jwtToken}`;
 
     res.redirect(redirectTo);
   } catch (err) {
@@ -117,11 +116,7 @@ app.get('/auth/callback', async (req, res) => {
 
 // ---- LOGOUT ----
 app.post('/auth/logout', (req, res) => {
-  res.clearCookie('session', {
-    httpOnly: true,
-    secure: !isDev,
-    sameSite: isDev ? 'lax' : 'none'
-  });
+  res.clearCookie('session');
   res.json({ success: true });
 });
 
