@@ -1,6 +1,5 @@
 require('dotenv').config();
 const { body, validationResult } = require('express-validator');
-const helmet = require('helmet');
 const cors = require('cors');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
@@ -20,7 +19,6 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
-app.use(helmet());
 
 // ---- SUPABASE ----
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
