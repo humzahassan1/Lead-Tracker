@@ -13,7 +13,7 @@ function App() {
   const [view, setView] = useState('properties')
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState('')
-  const [newProp, setNewProp] = useState({ name: '', address: '' })
+  const [newProp, setNewProp] = useState({ name: '', address: '', owner_name: '', owner_phone: '', owner_email: '', owner_notes: '' })
   const [newLead, setNewLead] = useState({ name: '', phone: '', email: '', notes: '' })
   const [showAddProp, setShowAddProp] = useState(false)
   const [showAddLead, setShowAddLead] = useState(false)
@@ -116,7 +116,7 @@ function App() {
     await axios.post(`${API}/properties`, newProp, {
       headers: authHeaders()
     })
-    setNewProp({ name: '', address: '' })
+    setNewProp({ name: '', address: '', owner_name: '', owner_phone: '', owner_email: '', owner_notes: '' })
     setShowAddProp(false)
     loadProperties()
   }
