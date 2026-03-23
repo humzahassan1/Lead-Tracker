@@ -27,13 +27,15 @@ app.use(helmet());
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // ---- RATE LIMITING ----
+app.set('trust proxy', 1);
+
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    message: { error: 'Too many requests, slow down.' },
-    validate: { xForwardedForHeader: false }
-  });
-  app.set('trust proxy', 1);
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { error: 'Too many requests, slow down.' },
+  validate: { xForwardedForHeader: false }
+});
+app.use(limiter);
 
 // ---- MICROSOFT AUTH ----
 const msalConfig = {
