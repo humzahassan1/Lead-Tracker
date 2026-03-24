@@ -130,7 +130,13 @@ function App() {
     setShowAddLead(false)
     loadLeads(selectedProp.id)
   }
-
+  async function deleteLead(leadId) {
+    if (!window.confirm('Delete this lead?')) return
+    await axios.delete(`${API}/leads/${leadId}`, {
+      headers: authHeaders()
+    })
+    loadLeads(selectedProp.id)
+  }
   async function logout() {
     tokenRef.current = null
     sessionStorage.removeItem('token')
@@ -199,6 +205,12 @@ function App() {
               {lead.phone && <div className="card-meta">📞 {lead.phone}</div>}
               {lead.email && <div className="card-meta">✉ {lead.email}</div>}
               {lead.notes && <div className="card-notes">{lead.notes}</div>}
+              <button
+                onClick={() => deleteLead(lead.id)}
+                style={{ marginTop: 8, background: 'none', border: '1px solid #5a1a1a', color: '#e05555', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}
+              >
+                Delete
+              </button>
             </div>
           ))}
         </div>
