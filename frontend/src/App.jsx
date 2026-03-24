@@ -137,6 +137,15 @@ function App() {
     })
     loadLeads(selectedProp.id)
   }
+
+  async function deleteProperty(propId) {
+    if (!window.confirm('Delete this property and all its leads?')) return
+    await axios.delete(`${API}/properties/${propId}`, {
+      headers: authHeaders()
+    })
+    setView('properties')
+    loadProperties()
+  }
   async function logout() {
     tokenRef.current = null
     sessionStorage.removeItem('token')
@@ -214,6 +223,14 @@ function App() {
             </div>
           ))}
         </div>
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #222' }}>
+  <button
+    onClick={() => deleteProperty(selectedProp.id)}
+    style={{ background: 'none', border: '1px solid #5a1a1a', color: '#e05555', borderRadius: 6, padding: '8px 16px', fontSize: 13, cursor: 'pointer', width: '100%' }}
+  >
+    Delete Property
+  </button>
+</div>
       </div>
     )
   }

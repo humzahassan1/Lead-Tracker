@@ -322,6 +322,19 @@ app.delete('/leads/:leadId', requireAuth, async (req, res) => {
   res.json({ success: true });
 });
 
+app.delete('/properties/:propertyId', requireAuth, async (req, res) => {
+  const owns = await verifyPropertyOwner(req.params.propertyId, req.userId);
+  if (!owns) return res.status(403).json({ error: 'Access denied' });
+
+  const { error } = await supabase
+    .from('properties')
+    .delete()
+    .eq('id', req.params.propertyId);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
 // ---- START ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
