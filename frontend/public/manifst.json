@@ -1,0 +1,17 @@
+{
+    "name": "Lead Tracker",
+    "short_name": "Leads",
+    "description": "Track your property leads",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0D0D1A",
+    "theme_color": "#C8A96E",
+    "icons": [
+      {
+        "src": "/icons.svg",
+        "sizes": "any",
+        "type": "image/svg+xml",
+        "purpose": "any maskable"
+      }
+    ]
+  }
