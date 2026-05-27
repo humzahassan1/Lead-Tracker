@@ -1,9 +1,9 @@
-# EstateLog
+# Lead Tracker
 
-A full-stack real estate CRM built for a sub-team at commercial real estate firm. EstateLog allows real estate agents to track buyer leads organized by property, with automatic lead capture from Outlook emails via Microsoft Graph API.
+A full-stack real estate CRM built for a sub-team at commercial real estate firm. Lead Tracker allows real estate agents to track buyer leads organized by property, with automatic lead capture from Outlook emails via Microsoft Graph API.
 
 ## Live Demo
-[estatelog.vercel.app](https://lead-tracker-wine.vercel.app)
+[Lead Tracker.vercel.app](https://lead-tracker-wine.vercel.app)
 
 ## Features
 
