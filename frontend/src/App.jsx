@@ -13,6 +13,8 @@ function App() {
   const [userId, setUserId] = useState(null)
   const [userEmail, setUserEmail] = useState('')
   const [emailVerified, setEmailVerified] = useState(false)
+  const [emailDeliveryConfigured, setEmailDeliveryConfigured] = useState(true)
+  const [devVerifyUrl, setDevVerifyUrl] = useState('')
   const [loading, setLoading] = useState(true)
   const [properties, setProperties] = useState([])
   const [selectedProp, setSelectedProp] = useState(null)
@@ -33,6 +35,7 @@ function App() {
       setUserId(res.data.userId)
       setUserEmail(res.data.userEmail)
       setEmailVerified(!!res.data.emailVerified)
+      setEmailDeliveryConfigured(res.data.emailDeliveryConfigured !== false)
     } catch {
       setUserId(null)
       setUserEmail('')
@@ -104,8 +107,12 @@ function App() {
   async function resendVerification() {
     setResending(true)
     setVerifyMsg('')
+    setDevVerifyUrl('')
     try {
       const res = await api.post('/auth/resend-verification')
+      if (res.data.devVerifyUrl) {
+        setDevVerifyUrl(res.data.devVerifyUrl)
+      }
       setVerifyMsg(res.data.message || 'Verification email sent.')
     } catch (err) {
       if (err.response?.status === 429) {
@@ -234,10 +241,19 @@ function App() {
       <div className="login-page">
         <div className="login-box verify-box">
           <h1>✉ Verify your email</h1>
-          <p>We sent a verification link to:</p>
+          {emailDeliveryConfigured ? (
+            <p>We sent a verification link to:</p>
+          ) : (
+            <p>Email sending is not configured on the server yet. Click resend after your admin sets <code>RESEND_API_KEY</code> in Railway, or use a dev link below.</p>
+          )}
           <p className="verify-email">{userEmail}</p>
           <p>Click the link in that email to unlock syncing, leads, and property edits.</p>
           {verifyMsg && <div className="sync-msg">{verifyMsg}</div>}
+          {devVerifyUrl && (
+            <p className="verify-dev-link">
+              Dev link: <a href={devVerifyUrl}>Verify now</a>
+            </p>
+          )}
           <div className="verify-actions">
             <button className="login-btn" onClick={resendVerification} disabled={resending}>
               {resending ? 'Sending...' : 'Resend verification email'}

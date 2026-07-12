@@ -134,7 +134,14 @@ This app uses **Microsoft OAuth** (not Supabase Auth or Clerk). Required email v
 
 **Setting to enable/disable:** set `REQUIRE_EMAIL_VERIFICATION=true` in Railway (default). Set to `false` only for local dev without email delivery.
 
-**Send verification emails:** set `RESEND_API_KEY` and `EMAIL_FROM` in Railway. Without Resend, the verification link is logged to the server console.
+**Send verification emails:** set `RESEND_API_KEY` and `EMAIL_FROM` in Railway.
+
+1. Create a free account at [resend.com](https://resend.com)
+2. **API Keys** → create a key → set `RESEND_API_KEY` in Railway
+3. **Domains** → add and verify your domain → set `EMAIL_FROM=Lead Tracker <noreply@yourdomain.com>`
+4. For quick testing only, use `EMAIL_FROM=Lead Tracker <onboarding@resend.dev>` — Resend will **only deliver to the email address on your Resend account**
+
+Without `RESEND_API_KEY`, no email is sent (the app used to show success anyway; it now shows an error in production).
 
 ### Auth rate limiting
 
