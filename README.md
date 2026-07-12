@@ -27,7 +27,7 @@ A full-stack real estate CRM built for a sub-team at commercial real estate firm
 
 ## Security
 
-- **JWT Bearer Token Auth** — tokens passed via Authorization header, stored in sessionStorage
+- **httpOnly Session Cookies** — JWT stored in `httpOnly`, `Secure`, `SameSite` cookies (never in `localStorage`/`sessionStorage`)
 - **IDOR Protection** — every request verifies the resource belongs to the requesting user
 - **Rate Limiting** — max 100 requests per 15 minutes per IP
 - **Input Sanitization** — all user inputs validated and escaped via express-validator
