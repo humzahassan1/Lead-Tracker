@@ -29,6 +29,8 @@ A full-stack real estate CRM built for a sub-team at commercial real estate firm
 
 - **httpOnly Session Cookies** — JWT stored in `httpOnly`, `Secure`, `SameSite` cookies (never in `localStorage`/`sessionStorage`)
 - **IDOR Protection** — every request verifies the resource belongs to the requesting user
+- **Server-side session auth** — JWT re-verified from httpOnly cookie on every protected route; role checked via `requireRole`
+- **Supabase RLS** — anon key blocked at the database layer (`supabase/rls.sql`); API uses service role key
 - **Rate Limiting** — max 100 requests per 15 minutes per IP
 - **Input Sanitization** — all user inputs validated and escaped via express-validator
 - **CORS** — restricted to the production frontend domain only
@@ -56,6 +58,7 @@ Create a `.env` file in the root:
 ```env
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 AZURE_CLIENT_ID=your_azure_client_id
 AZURE_TENANT_ID=your_azure_tenant_id
 AZURE_CLIENT_SECRET=your_azure_client_secret
@@ -113,6 +116,12 @@ create table leads (
   date_contacted date,
   created_at timestamp default now()
 );
+```
+
+Apply row-level security in Supabase (SQL Editor):
+
+```bash
+# Paste and run supabase/rls.sql
 ```
 
 ## Deployment
