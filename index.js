@@ -1,4 +1,5 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const cors = require('cors');
 const express = require('express');
@@ -72,6 +73,8 @@ const pca = new msal.ConfidentialClientApplication(msalConfig);
 const tokenCache = {};
 
 const USER_ROLE = 'agent';
+const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION !== 'false';
+const FRONTEND_URL = isDev ? 'http://localhost:5173' : 'https://lead-tracker-wine.vercel.app';
 
 // ---- SESSION / AUTHORIZATION ----
 function verifySessionToken(token) {
@@ -95,6 +98,35 @@ function getSessionFromRequest(req) {
   }
 }
 
+async function attachUserRecord(req, res, next) {
+  let { data, error } = await supabase
+    .from('users')
+    .select('email, email_confirmed_at')
+    .eq('id', req.userId)
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: 'Could not load user record' });
+
+  if (!data) {
+    try {
+      await upsertUserOnLogin(req.userId, req.userEmail);
+    } catch (upsertError) {
+      return res.status(500).json({ error: upsertError.message });
+    }
+    ({ data, error } = await supabase
+      .from('users')
+      .select('email, email_confirmed_at')
+      .eq('id', req.userId)
+      .maybeSingle());
+    if (error || !data) return res.status(500).json({ error: 'User record not found' });
+  }
+
+  req.userEmail = data.email;
+  req.emailConfirmedAt = data.email_confirmed_at;
+  req.emailVerified = !!data.email_confirmed_at;
+  next();
+}
+
 function requireAuth(req, res, next) {
   const session = getSessionFromRequest(req);
   if (!session) {
@@ -116,6 +148,79 @@ function requireRole(...allowedRoles) {
     }
     next();
   };
+}
+
+function requireVerifiedEmail(req, res, next) {
+  if (!REQUIRE_EMAIL_VERIFICATION) return next();
+  if (!req.emailVerified) {
+    return res.status(403).json({
+      error: 'email_not_verified',
+      message: 'Please verify your email before continuing.',
+      email: req.userEmail,
+    });
+  }
+  next();
+}
+
+async function sendVerificationEmail(email, token) {
+  const verifyUrl = `${FRONTEND_URL}/?verify_token=${token}`;
+
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`[email-verification] Link for ${email}: ${verifyUrl}`);
+    return;
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: process.env.EMAIL_FROM || 'Lead Tracker <onboarding@resend.dev>',
+      to: email,
+      subject: 'Verify your email — Lead Tracker',
+      html: `<p>Please verify your email to use Lead Tracker.</p><p><a href="${verifyUrl}">Verify email</a></p><p>Or copy this link: ${verifyUrl}</p>`,
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Failed to send verification email: ${details}`);
+  }
+}
+
+async function upsertUserOnLogin(userId, userEmail) {
+  const { data: existing, error } = await supabase
+    .from('users')
+    .select('id, email, email_confirmed_at')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  if (!existing) {
+    const autoVerify = !REQUIRE_EMAIL_VERIFICATION;
+    const verificationToken = autoVerify ? null : crypto.randomBytes(32).toString('hex');
+
+    const { error: insertError } = await supabase.from('users').insert({
+      id: userId,
+      email: userEmail,
+      email_confirmed_at: autoVerify ? new Date().toISOString() : null,
+      verification_token: verificationToken,
+      verification_sent_at: autoVerify ? null : new Date().toISOString(),
+    });
+    if (insertError) throw insertError;
+
+    if (REQUIRE_EMAIL_VERIFICATION && verificationToken) {
+      await sendVerificationEmail(userEmail, verificationToken);
+    }
+    return;
+  }
+
+  if (existing.email !== userEmail) {
+    await supabase.from('users').update({ email: userEmail }).eq('id', userId);
+  }
 }
 
 // ---- STEP 1: Login redirect ----
@@ -143,6 +248,8 @@ app.get('/auth/callback', async (req, res) => {
     const userEmail = result.account.username;
     tokenCache[userId] = result.accessToken;
 
+    await upsertUserOnLogin(userId, userEmail);
+
     const jwtToken = jwt.sign(
       { userId, userEmail, role: USER_ROLE },
       process.env.JWT_SECRET,
@@ -169,8 +276,68 @@ app.post('/auth/logout', requireAuth, (req, res) => {
 });
 
 // ---- GET CURRENT USER ----
-app.get('/auth/me', requireAuth, requireRole(USER_ROLE), (req, res) => {
-  res.json({ userId: req.userId, userEmail: req.userEmail, role: req.userRole });
+app.get('/auth/me', requireAuth, attachUserRecord, requireRole(USER_ROLE), (req, res) => {
+  res.json({
+    userId: req.userId,
+    userEmail: req.userEmail,
+    role: req.userRole,
+    emailVerified: req.emailVerified,
+    email_confirmed_at: req.emailConfirmedAt,
+    requireEmailVerification: REQUIRE_EMAIL_VERIFICATION,
+  });
+});
+
+// ---- EMAIL VERIFICATION ----
+app.get('/auth/verify-email', async (req, res) => {
+  const token = req.query.token;
+  if (!token) return res.status(400).json({ error: 'Verification token required' });
+
+  const { data: user, error } = await supabase
+    .from('users')
+    .select('id, email')
+    .eq('verification_token', token)
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!user) return res.status(400).json({ error: 'Invalid or expired verification link' });
+
+  const { error: updateError } = await supabase
+    .from('users')
+    .update({
+      email_confirmed_at: new Date().toISOString(),
+      verification_token: null,
+    })
+    .eq('id', user.id);
+
+  if (updateError) return res.status(500).json({ error: updateError.message });
+  res.json({ success: true, email: user.email });
+});
+
+app.post('/auth/resend-verification', requireAuth, attachUserRecord, async (req, res) => {
+  if (!REQUIRE_EMAIL_VERIFICATION) {
+    return res.json({ success: true, message: 'Email verification is disabled' });
+  }
+  if (req.emailVerified) {
+    return res.json({ success: true, message: 'Email already verified' });
+  }
+
+  const verificationToken = crypto.randomBytes(32).toString('hex');
+  const { error } = await supabase
+    .from('users')
+    .update({
+      verification_token: verificationToken,
+      verification_sent_at: new Date().toISOString(),
+    })
+    .eq('id', req.userId);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  try {
+    await sendVerificationEmail(req.userEmail, verificationToken);
+    res.json({ success: true, message: 'Verification email sent' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---- IDOR PROTECTION ----
@@ -215,7 +382,7 @@ function extractLeadInfo(email) {
 }
 
 // ---- SYNC EMAILS ----
-app.post('/sync-emails', requireAuth, requireRole(USER_ROLE), async (req, res) => {
+app.post('/sync-emails', requireAuth, attachUserRecord, requireVerifiedEmail, requireRole(USER_ROLE), async (req, res) => {
   const userId = req.userId;
   const token = req.msToken;
   if (!token) return res.status(401).json({ error: 'Microsoft token expired, please log in again' });
@@ -293,7 +460,7 @@ app.post('/sync-emails', requireAuth, requireRole(USER_ROLE), async (req, res) =
 });
 
 // ---- PROPERTIES ----
-app.get('/properties', requireAuth, requireRole(USER_ROLE), async (req, res) => {
+app.get('/properties', requireAuth, attachUserRecord, requireRole(USER_ROLE), async (req, res) => {
   const { data, error } = await supabase
     .from('properties')
     .select('*')
@@ -303,7 +470,7 @@ app.get('/properties', requireAuth, requireRole(USER_ROLE), async (req, res) => 
   res.json(data);
 });
 
-app.post('/properties', requireAuth, requireRole(USER_ROLE), [
+app.post('/properties', requireAuth, attachUserRecord, requireVerifiedEmail, requireRole(USER_ROLE), [
   body('name').trim().escape().notEmpty(),
   body('address').trim().escape()
 ], async (req, res) => {
@@ -323,7 +490,7 @@ app.post('/properties', requireAuth, requireRole(USER_ROLE), [
 });
 
 // ---- LEADS ----
-app.get('/properties/:propertyId/leads', requireAuth, requireRole(USER_ROLE), async (req, res) => {
+app.get('/properties/:propertyId/leads', requireAuth, attachUserRecord, requireVerifiedEmail, requireRole(USER_ROLE), async (req, res) => {
   const owns = await verifyPropertyOwner(req.params.propertyId, req.userId);
   if (!owns) return res.status(403).json({ error: 'Access denied' });
 
@@ -337,7 +504,7 @@ app.get('/properties/:propertyId/leads', requireAuth, requireRole(USER_ROLE), as
   res.json(data);
 });
 
-app.post('/properties/:propertyId/leads', requireAuth, requireRole(USER_ROLE), [
+app.post('/properties/:propertyId/leads', requireAuth, attachUserRecord, requireVerifiedEmail, requireRole(USER_ROLE), [
   body('name').trim().escape().notEmpty(),
   body('phone').trim().escape(),
   body('email').trim().normalizeEmail(),
@@ -365,7 +532,7 @@ app.post('/properties/:propertyId/leads', requireAuth, requireRole(USER_ROLE), [
   res.json(data);
 });
 
-app.delete('/leads/:leadId', requireAuth, requireRole(USER_ROLE), async (req, res) => {
+app.delete('/leads/:leadId', requireAuth, attachUserRecord, requireVerifiedEmail, requireRole(USER_ROLE), async (req, res) => {
   const lead = await verifyLeadOwner(req.params.leadId, req.userId);
   if (!lead) return res.status(403).json({ error: 'Access denied' });
 
@@ -379,7 +546,7 @@ app.delete('/leads/:leadId', requireAuth, requireRole(USER_ROLE), async (req, re
   res.json({ success: true });
 });
 
-app.delete('/properties/:propertyId', requireAuth, requireRole(USER_ROLE), async (req, res) => {
+app.delete('/properties/:propertyId', requireAuth, attachUserRecord, requireVerifiedEmail, requireRole(USER_ROLE), async (req, res) => {
   const owns = await verifyPropertyOwner(req.params.propertyId, req.userId);
   if (!owns) return res.status(403).json({ error: 'Access denied' });
 
