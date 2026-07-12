@@ -167,8 +167,13 @@ async function sendVerificationEmail(email, token) {
   const verifyUrl = `${FRONTEND_URL}/?verify_token=${token}`;
 
   if (!process.env.RESEND_API_KEY) {
-    console.log(`[email-verification] Link for ${email}: ${verifyUrl}`);
-    return;
+    console.log(`[email-verification] RESEND_API_KEY not set. Link for ${email}: ${verifyUrl}`);
+    if (isDev) {
+      return { delivered: false, devVerifyUrl: verifyUrl };
+    }
+    throw new Error(
+      'Email delivery is not configured. Set RESEND_API_KEY and EMAIL_FROM in Railway (see README).'
+    );
   }
 
   const response = await fetch('https://api.resend.com/emails', {
@@ -179,7 +184,7 @@ async function sendVerificationEmail(email, token) {
     },
     body: JSON.stringify({
       from: process.env.EMAIL_FROM || 'Lead Tracker <onboarding@resend.dev>',
-      to: email,
+      to: [email],
       subject: 'Verify your email — Lead Tracker',
       html: `<p>Please verify your email to use Lead Tracker.</p><p><a href="${verifyUrl}">Verify email</a></p><p>Or copy this link: ${verifyUrl}</p>`,
     }),
@@ -189,6 +194,8 @@ async function sendVerificationEmail(email, token) {
     const details = await response.text();
     throw new Error(`Failed to send verification email: ${details}`);
   }
+
+  return { delivered: true };
 }
 
 async function upsertUserOnLogin(userId, userEmail) {
@@ -214,7 +221,11 @@ async function upsertUserOnLogin(userId, userEmail) {
     if (insertError) throw insertError;
 
     if (REQUIRE_EMAIL_VERIFICATION && verificationToken) {
-      await sendVerificationEmail(userEmail, verificationToken);
+      try {
+        await sendVerificationEmail(userEmail, verificationToken);
+      } catch (err) {
+        console.error('[email-verification] Failed on login:', err.message);
+      }
     }
     return;
   }
@@ -285,6 +296,7 @@ app.get('/auth/me', requireAuth, attachUserRecord, requireRole(USER_ROLE), (req,
     emailVerified: req.emailVerified,
     email_confirmed_at: req.emailConfirmedAt,
     requireEmailVerification: REQUIRE_EMAIL_VERIFICATION,
+    emailDeliveryConfigured: !!process.env.RESEND_API_KEY,
   });
 });
 
@@ -334,8 +346,15 @@ app.post('/auth/resend-verification', requireAuth, attachUserRecord, authRateLim
   if (error) return res.status(500).json({ error: error.message });
 
   try {
-    await sendVerificationEmail(req.userEmail, verificationToken);
-    res.json({ success: true, message: 'Verification email sent' });
+    const result = await sendVerificationEmail(req.userEmail, verificationToken);
+    res.json({
+      success: true,
+      delivered: result.delivered,
+      message: result.delivered
+        ? 'Verification email sent. Check your inbox and spam folder.'
+        : 'Email delivery is not configured on the server. Use the dev link below or set RESEND_API_KEY in Railway.',
+      devVerifyUrl: result.devVerifyUrl || undefined,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

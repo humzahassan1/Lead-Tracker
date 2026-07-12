@@ -131,3 +131,5 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .verify-email { color: #c8a96e; font-weight: 700; margin: 8px 0 16px; word-break: break-all; }
 .verify-actions { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; align-items: stretch; }
 .verify-actions .login-btn { text-align: center; border: none; cursor: pointer; }
+.verify-dev-link { font-size: 13px; color: #888; margin-top: 12px; word-break: break-all; }
+.verify-dev-link a { color: #c8a96e; }
