@@ -9,6 +9,7 @@ const msal = require('@azure/msal-node');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
+const { authRateLimit } = require('./lib/authRateLimit');
 
 const app = express();
 const isDev = process.env.NODE_ENV !== 'production';
@@ -223,8 +224,8 @@ async function upsertUserOnLogin(userId, userEmail) {
   }
 }
 
-// ---- STEP 1: Login redirect ----
-app.get('/auth/login', (req, res) => {
+// ---- STEP 1: Login redirect (signup uses same Microsoft OAuth entry point) ----
+app.get('/auth/login', authRateLimit('login'), (req, res) => {
   const authUrl = pca.getAuthCodeUrl({
     scopes: ['Mail.Read', 'User.Read'],
     redirectUri: 'https://lead-tracker-production.up.railway.app/auth/callback',
@@ -233,7 +234,7 @@ app.get('/auth/login', (req, res) => {
 });
 
 // ---- STEP 2: Auth callback ----
-app.get('/auth/callback', async (req, res) => {
+app.get('/auth/callback', authRateLimit('login-callback'), async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('No code provided');
 
@@ -287,8 +288,8 @@ app.get('/auth/me', requireAuth, attachUserRecord, requireRole(USER_ROLE), (req,
   });
 });
 
-// ---- EMAIL VERIFICATION ----
-app.get('/auth/verify-email', async (req, res) => {
+// ---- EMAIL VERIFICATION (password-reset equivalent) ----
+app.get('/auth/verify-email', authRateLimit('verify-email', (req) => req.query.token || ''), async (req, res) => {
   const token = req.query.token;
   if (!token) return res.status(400).json({ error: 'Verification token required' });
 
@@ -313,7 +314,7 @@ app.get('/auth/verify-email', async (req, res) => {
   res.json({ success: true, email: user.email });
 });
 
-app.post('/auth/resend-verification', requireAuth, attachUserRecord, async (req, res) => {
+app.post('/auth/resend-verification', requireAuth, attachUserRecord, authRateLimit('resend-verification', (req) => req.userEmail), async (req, res) => {
   if (!REQUIRE_EMAIL_VERIFICATION) {
     return res.json({ success: true, message: 'Email verification is disabled' });
   }

@@ -108,7 +108,14 @@ function App() {
       const res = await api.post('/auth/resend-verification')
       setVerifyMsg(res.data.message || 'Verification email sent.')
     } catch (err) {
-      setVerifyMsg(err.response?.data?.error || 'Could not send verification email.')
+      if (err.response?.status === 429) {
+        const retry = err.response?.data?.retryAfterSec
+        setVerifyMsg(retry
+          ? `Too many attempts. Try again in ${retry} seconds.`
+          : 'Too many attempts. Please wait 15 minutes and try again.')
+      } else {
+        setVerifyMsg(err.response?.data?.error || 'Could not send verification email.')
+      }
     }
     setResending(false)
   }

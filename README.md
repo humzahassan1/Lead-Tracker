@@ -136,6 +136,35 @@ This app uses **Microsoft OAuth** (not Supabase Auth or Clerk). Required email v
 
 **Send verification emails:** set `RESEND_API_KEY` and `EMAIL_FROM` in Railway. Without Resend, the verification link is logged to the server console.
 
+### Auth rate limiting
+
+Login, OAuth callback, and verification/resend flows are limited to **5 attempts per 15 minutes** per IP (and per IP+email where an email is known). The **6th attempt returns HTTP 429** with `Retry-After` and a temporary lockout until the window expires.
+
+| Flow | Route | Limit key |
+|------|-------|-----------|
+| Login | `GET /auth/login` | IP |
+| Signup (OAuth callback) | `GET /auth/callback` | IP |
+| Verify email | `GET /auth/verify-email` | IP + token |
+| Resend verification | `POST /auth/resend-verification` | IP + email |
+
+Test locally (6th request should be `429`):
+
+```bash
+# Login / signup entry
+for i in 1 2 3 4 5 6; do
+  echo -n "login attempt $i: "
+  curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/auth/login
+done
+
+# Resend verification (must be logged in with session cookie)
+for i in 1 2 3 4 5 6; do
+  echo -n "resend attempt $i: "
+  curl -s -o /dev/null -w "%{http_code}\n" -b "session=YOUR_JWT" -X POST http://localhost:3000/auth/resend-verification
+done
+```
+
+For multi-instance production, swap the in-memory limiter in `lib/authRateLimit.js` for [Upstash Ratelimit](https://github.com/upstash/ratelimit-js).
+
 ## Deployment
 
 - **Backend** — push to GitHub, Railway auto-deploys
