@@ -12,6 +12,23 @@ const cookieParser = require('cookie-parser');
 const app = express();
 const isDev = process.env.NODE_ENV !== 'production';
 
+const SESSION_COOKIE = 'session';
+const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
+
+function sessionCookieOptions() {
+  // Local dev (localhost:5173 → localhost:3000) is same-site, so Lax works.
+  // Production Vercel frontend + Railway API are cross-site; credentialed XHR
+  // requires SameSite=None with Secure (Lax blocks cross-site subrequests).
+  const sameSite = isDev ? 'lax' : 'none';
+  return {
+    httpOnly: true,
+    secure: !isDev,
+    sameSite,
+    maxAge: SESSION_MAX_AGE_MS,
+    path: '/',
+  };
+}
+
 app.use(express.json());
 app.use(cookieParser());
 app.use(cors({
@@ -48,15 +65,7 @@ const tokenCache = {};
 
 // ---- JWT MIDDLEWARE ----
 function requireAuth(req, res, next) {
-  let token = null;
-
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.split(' ')[1];
-  } else {
-    token = req.cookies.session;
-  }
-
+  const token = req.cookies[SESSION_COOKIE];
   if (!token) return res.status(401).json({ error: 'Not logged in' });
 
   try {
@@ -66,7 +75,7 @@ function requireAuth(req, res, next) {
     req.msToken = tokenCache[decoded.userId];
     next();
   } catch (err) {
-    res.clearCookie('session');
+    res.clearCookie(SESSION_COOKIE, sessionCookieOptions());
     return res.status(401).json({ error: 'Session expired, please log in again' });
   }
 }
@@ -102,9 +111,11 @@ app.get('/auth/callback', async (req, res) => {
       { expiresIn: '8h' }
     );
 
+    res.cookie(SESSION_COOKIE, jwtToken, sessionCookieOptions());
+
     const redirectTo = isDev
-      ? `http://localhost:5173?token=${jwtToken}`
-      : `https://lead-tracker-wine.vercel.app?token=${jwtToken}`;
+      ? 'http://localhost:5173'
+      : 'https://lead-tracker-wine.vercel.app';
 
     res.redirect(redirectTo);
   } catch (err) {
@@ -114,7 +125,7 @@ app.get('/auth/callback', async (req, res) => {
 
 // ---- LOGOUT ----
 app.post('/auth/logout', (req, res) => {
-  res.clearCookie('session');
+  res.clearCookie(SESSION_COOKIE, sessionCookieOptions());
   res.json({ success: true });
 });
 
