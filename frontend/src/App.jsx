@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import './App.css'
 
@@ -11,6 +11,8 @@ const api = axios.create({
 
 function App() {
   const [userId, setUserId] = useState(null)
+  const [userEmail, setUserEmail] = useState('')
+  const [emailVerified, setEmailVerified] = useState(false)
   const [loading, setLoading] = useState(true)
   const [properties, setProperties] = useState([])
   const [selectedProp, setSelectedProp] = useState(null)
@@ -18,31 +20,58 @@ function App() {
   const [view, setView] = useState('properties')
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState('')
+  const [verifyMsg, setVerifyMsg] = useState('')
+  const [resending, setResending] = useState(false)
   const [newProp, setNewProp] = useState({ name: '', address: '', owner_name: '', owner_phone: '', owner_email: '', owner_notes: '' })
   const [newLead, setNewLead] = useState({ name: '', phone: '', email: '', notes: '' })
   const [showAddProp, setShowAddProp] = useState(false)
   const [showAddLead, setShowAddLead] = useState(false)
 
-  useEffect(() => {
-    // Purge legacy client-side tokens from the previous auth scheme
-    sessionStorage.removeItem('token')
-    localStorage.removeItem('token')
-
-    async function checkAuth() {
-      try {
-        const res = await api.get('/auth/me')
-        setUserId(res.data.userId)
-      } catch {
-        setUserId(null)
-      }
-      setLoading(false)
+  const checkAuth = useCallback(async () => {
+    try {
+      const res = await api.get('/auth/me')
+      setUserId(res.data.userId)
+      setUserEmail(res.data.userEmail)
+      setEmailVerified(!!res.data.emailVerified)
+    } catch {
+      setUserId(null)
+      setUserEmail('')
+      setEmailVerified(false)
     }
-    checkAuth()
+    setLoading(false)
   }, [])
 
   useEffect(() => {
-    if (userId) loadProperties()
-  }, [userId])
+    sessionStorage.removeItem('token')
+    localStorage.removeItem('token')
+
+    async function bootstrap() {
+      const params = new URLSearchParams(window.location.search)
+      const verifyToken = params.get('verify_token')
+
+      if (verifyToken) {
+        try {
+          await api.get('/auth/verify-email', { params: { token: verifyToken } })
+          setVerifyMsg('Email verified! You can now use Lead Tracker.')
+          window.history.replaceState({}, '', '/?verified=1')
+        } catch {
+          setVerifyMsg('Verification link is invalid or expired. Request a new one below.')
+          window.history.replaceState({}, '', '/')
+        }
+      } else if (params.get('verified') === '1') {
+        setVerifyMsg('Email verified! You can now use Lead Tracker.')
+        window.history.replaceState({}, '', '/')
+      }
+
+      await checkAuth()
+    }
+
+    bootstrap()
+  }, [checkAuth])
+
+  useEffect(() => {
+    if (userId && emailVerified) loadProperties()
+  }, [userId, emailVerified])
 
   async function loadProperties() {
     try {
@@ -51,6 +80,10 @@ function App() {
     } catch (err) {
       if (err.response?.status === 401) {
         setUserId(null)
+        setEmailVerified(false)
+      }
+      if (err.response?.data?.error === 'email_not_verified') {
+        setEmailVerified(false)
       }
     }
   }
@@ -60,8 +93,24 @@ function App() {
       const res = await api.get(`/properties/${propId}/leads`)
       setLeads(res.data)
     } catch (err) {
-      console.error(err)
+      if (err.response?.data?.error === 'email_not_verified') {
+        setEmailVerified(false)
+      } else {
+        console.error(err)
+      }
     }
+  }
+
+  async function resendVerification() {
+    setResending(true)
+    setVerifyMsg('')
+    try {
+      const res = await api.post('/auth/resend-verification')
+      setVerifyMsg(res.data.message || 'Verification email sent.')
+    } catch (err) {
+      setVerifyMsg(err.response?.data?.error || 'Could not send verification email.')
+    }
+    setResending(false)
   }
 
   async function syncEmails() {
@@ -75,6 +124,9 @@ function App() {
       if (err.response?.status === 401) {
         setSyncMsg('Session expired. Please log in again.')
         setUserId(null)
+      } else if (err.response?.data?.error === 'email_not_verified') {
+        setEmailVerified(false)
+        setSyncMsg('Verify your email before syncing.')
       } else {
         setSyncMsg('Sync failed. Try again.')
       }
@@ -84,39 +136,60 @@ function App() {
 
   async function addProperty() {
     if (!newProp.name) return
-    await api.post('/properties', newProp)
-    setNewProp({ name: '', address: '', owner_name: '', owner_phone: '', owner_email: '', owner_notes: '' })
-    setShowAddProp(false)
-    loadProperties()
+    try {
+      await api.post('/properties', newProp)
+      setNewProp({ name: '', address: '', owner_name: '', owner_phone: '', owner_email: '', owner_notes: '' })
+      setShowAddProp(false)
+      loadProperties()
+    } catch (err) {
+      if (err.response?.data?.error === 'email_not_verified') setEmailVerified(false)
+    }
   }
 
   async function addLead() {
     if (!newLead.name) return
-    await api.post(`/properties/${selectedProp.id}/leads`, newLead)
-    setNewLead({ name: '', phone: '', email: '', notes: '' })
-    setShowAddLead(false)
-    loadLeads(selectedProp.id)
+    try {
+      await api.post(`/properties/${selectedProp.id}/leads`, newLead)
+      setNewLead({ name: '', phone: '', email: '', notes: '' })
+      setShowAddLead(false)
+      loadLeads(selectedProp.id)
+    } catch (err) {
+      if (err.response?.data?.error === 'email_not_verified') setEmailVerified(false)
+    }
   }
+
   async function deleteLead(leadId) {
     if (!window.confirm('Delete this lead?')) return
-    await api.delete(`/leads/${leadId}`)
-    loadLeads(selectedProp.id)
+    try {
+      await api.delete(`/leads/${leadId}`)
+      loadLeads(selectedProp.id)
+    } catch (err) {
+      if (err.response?.data?.error === 'email_not_verified') setEmailVerified(false)
+    }
   }
 
   async function deleteProperty(propId) {
     if (!window.confirm('Delete this property and all its leads?')) return
-    await api.delete(`/properties/${propId}`)
-    setView('properties')
-    loadProperties()
+    try {
+      await api.delete(`/properties/${propId}`)
+      setView('properties')
+      loadProperties()
+    } catch (err) {
+      if (err.response?.data?.error === 'email_not_verified') setEmailVerified(false)
+    }
   }
+
   async function logout() {
     try {
       await api.post('/auth/logout')
     } catch {
-      // ignore network errors; clear local UI state regardless
+      // ignore
     }
     setUserId(null)
+    setUserEmail('')
+    setEmailVerified(false)
     setProperties([])
+    setVerifyMsg('')
   }
 
   function openProperty(prop) {
@@ -144,6 +217,26 @@ function App() {
           <a href={`${API}/auth/login`} className="login-btn">
             Sign in with Microsoft
           </a>
+        </div>
+      </div>
+    )
+  }
+
+  if (!emailVerified) {
+    return (
+      <div className="login-page">
+        <div className="login-box verify-box">
+          <h1>✉ Verify your email</h1>
+          <p>We sent a verification link to:</p>
+          <p className="verify-email">{userEmail}</p>
+          <p>Click the link in that email to unlock syncing, leads, and property edits.</p>
+          {verifyMsg && <div className="sync-msg">{verifyMsg}</div>}
+          <div className="verify-actions">
+            <button className="login-btn" onClick={resendVerification} disabled={resending}>
+              {resending ? 'Sending...' : 'Resend verification email'}
+            </button>
+            <button className="logout-btn" onClick={logout}>Logout</button>
+          </div>
         </div>
       </div>
     )
@@ -190,13 +283,13 @@ function App() {
           ))}
         </div>
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #222' }}>
-  <button
-    onClick={() => deleteProperty(selectedProp.id)}
-    style={{ background: 'none', border: '1px solid #5a1a1a', color: '#e05555', borderRadius: 6, padding: '8px 16px', fontSize: 13, cursor: 'pointer', width: '100%' }}
-  >
-    Delete Property
-  </button>
-</div>
+          <button
+            onClick={() => deleteProperty(selectedProp.id)}
+            style={{ background: 'none', border: '1px solid #5a1a1a', color: '#e05555', borderRadius: 6, padding: '8px 16px', fontSize: 13, cursor: 'pointer', width: '100%' }}
+          >
+            Delete Property
+          </button>
+        </div>
       </div>
     )
   }
@@ -214,6 +307,7 @@ function App() {
         </div>
       </header>
 
+      {verifyMsg && <div className="sync-msg">{verifyMsg}</div>}
       {syncMsg && <div className="sync-msg">{syncMsg}</div>}
 
       {showAddProp && (

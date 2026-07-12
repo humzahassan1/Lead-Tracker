@@ -63,6 +63,9 @@ AZURE_CLIENT_ID=your_azure_client_id
 AZURE_TENANT_ID=your_azure_tenant_id
 AZURE_CLIENT_SECRET=your_azure_client_secret
 JWT_SECRET=your_random_secret
+REQUIRE_EMAIL_VERIFICATION=true
+RESEND_API_KEY=your_resend_api_key
+EMAIL_FROM=Lead Tracker <noreply@yourdomain.com>
 PORT=3000
 NODE_ENV=development
 ```
@@ -122,7 +125,16 @@ Apply row-level security in Supabase (SQL Editor):
 
 ```bash
 # Paste and run supabase/rls.sql
+# Paste and run supabase/users.sql
 ```
+
+### Email verification
+
+This app uses **Microsoft OAuth** (not Supabase Auth or Clerk). Required email verification is enforced server-side via the `users.email_confirmed_at` column.
+
+**Setting to enable/disable:** set `REQUIRE_EMAIL_VERIFICATION=true` in Railway (default). Set to `false` only for local dev without email delivery.
+
+**Send verification emails:** set `RESEND_API_KEY` and `EMAIL_FROM` in Railway. Without Resend, the verification link is logged to the server console.
 
 ## Deployment
 
